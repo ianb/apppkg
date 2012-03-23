@@ -2,24 +2,16 @@ import sys
 import os
 import yaml
 import new
-import zipfile
 import tempfile
 import subprocess
 from site import addsitedir
 
 
-class PyWebApp(object):
+class AppPackage(object):
 
-    def __init__(self, path, is_zip, config=None):
+    def __init__(self, path, config=None):
         self.path = path
-        self.is_zip = is_zip
         self._config = config
-
-    @classmethod
-    def from_path(cls, path):
-        is_zip = os.path.isfile(path)
-        ## FIXME: test if valid zip
-        return cls(path, is_zip=is_zip)
 
     @property
     def config(self):
@@ -33,40 +25,14 @@ class PyWebApp(object):
 
     ## Helpers for file names and handling:
 
-    def get_file(self, relpath):
-        if self.is_zip:
-            zf = zipfile.ZipFile(self.path, 'r')
-            return zf.open(relpath, 'rb')
-        else:
-            filename = os.path.join(self.path, relpath)
-            return open(filename, 'rb')
-
-    def expanded(self, path=None, tmpdir=None):
-        if not self.is_zip:
-            return self
-        if path is None:
-            path = tempfile.mkdtemp(dir=tmpdir)
-        zf = zipfile.ZipFile(self.path, 'r')
-        ## FIXME: this can escape the path (per zipfile docs):
-        zf.extractall(path)
-        return self.__class__.from_path(path)
+    def open(self, relpath, mode='rb'):
+        return open(self.abspath(filename), mode)
 
     def abspath(self, *paths):
         return os.path.normcase(os.path.abspath(os.path.join(self.path, *paths)))
 
     def exists(self, path):
-        if self.is_zip:
-            zf = zipfile.ZipFile(path, 'r')
-            try:
-                try:
-                    zf.getinfo(path)
-                    return True
-                except KeyError:
-                    return False
-            finally:
-                zf.close()
-        else:
-            return os.path.exists(self.abspath(path))
+        return os.path.exists(self.abspath(path))
 
     ## Properties to read and normalize specific configuration values:
 
@@ -152,9 +118,9 @@ class PyWebApp(object):
 
     def setup_settings(self):
         """Create the settings that the application itself can import"""
-        if 'websettings' in sys.modules:
+        if 'appsettings' in sys.modules:
             return
-        module = new.module('websettings')
+        module = new.module('appbsettings')
         module.add_setting = _add_setting
         sys.modules[module.__name__] = module
         return module
@@ -221,7 +187,7 @@ class PyWebApp(object):
 
 def _add_setting(name, value):
     _check_settings_value(name, value)
-    setattr(sys.modules['websettings'], name, value)
+    setattr(sys.modules['appsettings'], name, value)
 
 
 def _check_settings_value(name, value):

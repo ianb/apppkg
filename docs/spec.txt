@@ -1,9 +1,9 @@
-PyWebApps
-=========
+Application Packages
+====================
 
 This describes, somewhat pedantically and in a non-helpful order,
-parts of what makes up a PyWebApp.  Known-open-questions are marked
-with "FIXME".
+parts of what makes up an Application Package.  Known-open-questions
+are marked with "FIXME".
 
 Process Initialization
 ----------------------
@@ -11,29 +11,27 @@ Process Initialization
 This is the process that the container must go through when
 starting/activating an application.
 
-You should instantiate ``app = pywebapp.PyWebApp()``
+You should instantiate ``app = apppkg.ApplciationPackage(path)``
 
 Then you should create the settings module with
-``app.setup_settings()``.  This creates a module ``websettings``.
+``app.setup_settings()``.  This creates a module ``appsettings``.
 
 Next you must activate all the services.  This is something your tool
 itself must do.  At its most basic you do::
 
-    websettings.add_setting(service_name, settings)
+    appsettings.add_setting(service_name, settings)
 
 For example::
 
-    websettings.add_setting('mysql', {'username': 'root', ...})
+    appsettings.add_setting('mysql', {'username': 'root', ...})
 
-This creates a value ``websettings.mysql`` (but the function does
+This creates a value ``appsettings.mysql`` (but the function does
 other checks for validity).  There are some helpers you can use (in
-``pywebapp.services``), but these are a convenience to you.
+``apppkg.services``), but these are a convenience to you.
 
 **After** you have setup the services you call ``app.activate_path()``
 to set ``sys.path``.  This also may import code that uses settings, so
 it is important to setup services first.
-
-Get the app from ``app.wsgi_app``
 
 Process Configuration
 ---------------------
@@ -43,23 +41,23 @@ host/container of the application that is being sent to the
 application.  Anything can go in here, including ad hoc settings, but
 some settings are expected.
 
-websettings.config_dir:
+appsettings.config_dir:
     The path to the configuration (a directory).  May be None.  Must
     be set.
 
-websettings.canonical_hostname:
+appsettings.canonical_hostname:
     The "base" hostname.  The application may be on a wildcard domain
     or something like that, but this is at least one hostname that
     will point back to the application.  It may be the only hostname.
     This like the Host header: ``domain:port``.
 
-websettings.canonical_scheme:
+appsettings.canonical_scheme:
     The expected scheme, generally either ``http`` or ``https``.
     ``environ['wsgi.url_scheme']`` also of course must be set.
     Generally this is set to https when the container is forcing all
     requests to be https.
 
-websettings.log_dir:
+appsettings.log_dir:
     A path where log files can be written.  It is simply writable, and
     is entirely under control of the application.  (FIXME: maybe a
     couple names here could be reserved by the container?  Or... maybe
@@ -77,7 +75,7 @@ current directory:
     an update).
 
 Also expect that over time specific settings will be documented and
-validated by this module.  E.g., the contents of ``websettings.mysql``
+validated by this module.  E.g., the contents of ``appsettings.mysql``
 may be standardized specifically.
 
 FIXME: some "version" of this specifically itself should go in here,
