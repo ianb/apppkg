@@ -300,7 +300,7 @@ update:
 before_delete:
     Called before deleting an application.
 
-ping:
+wsgi_ping:
     Called to check if an application is alive; must be low in
     resource usage.  A URL is most preferable for this parameter.
 
