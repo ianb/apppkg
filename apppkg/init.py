@@ -3,6 +3,8 @@
 import argparse
 import os
 
+here = os.path.dirname(os.path.abspath(__file__))
+
 parser = argparse.ArgumentParser(
     prog='python -c apppkg.init',
     description="Create a new apppkg layout",
@@ -19,8 +21,9 @@ parser.add_argument(
 
 TEMPLATE_DIRS = [
     '.',
-    '%(pkg_name)s/%(pkg_name)s',
+    '%(pkg_name)s-src/%(pkg_name)s',
     'vendor',
+    'bin',
     ]
 
 TEMPLATE_FILES = {
@@ -29,7 +32,7 @@ TEMPLATE_FILES = {
 platform: python wsgi
 name: %(name)s
 add_paths:
-  - %(pkg_name)s
+  - %(pkg_name)s-src
 requires:
   pip: requirements.txt
 wsgi: %(pkg_name)s.entrypoints:make_app()
@@ -42,7 +45,9 @@ before_delete: %(pkg_name)s.entrypoints:before_delete
 check_environment: %(pkg_name)s.entrypoints:check_environment
 """,
 
-    '%(pkg_name)s/%(pkg_name)s/entrypoints.py': """\
+    'README.txt': open(os.path.join(here, 'readme-layout.txt')).read(),
+
+    '%(pkg_name)s-src/%(pkg_name)s/entrypoints.py': """\
 # Each of the functions here is referred to in app.yaml
 # They start out simply stubbed out
 
@@ -80,9 +85,9 @@ def check_environment():
     pass
 """,
 
-    '%(pkg_name)s/%(pkg_name)s/__init__.py': """\
+    '%(pkg_name)s-src/%(pkg_name)s/__init__.py': """\
 """,
-    '%(pkg_name)s/sitecustomize.py': """\
+    '%(pkg_name)s-src/sitecustomize.py': """\
 # You can put code here that will be run when the process is setup
 """,
 
@@ -97,6 +102,9 @@ install_option =
     --install-purelib=%%(here)s/vendor/
     --install-platlib=%%(here)s/vendor-binary/
     --install-scripts=%%(here)s/bin/
+
+script_fixup = apppkg.scriptfixup:fixup
+
 """,
 
     '.gitignore': """\
@@ -105,12 +113,12 @@ vendor-binary
 
     'requirements.txt': """\
 # You MAY put libraries here that you require.
-# You SHOUlD instead try to use "pip install" to install things into vendor/
+# You SHOULD instead try to use "pip install" to install things into vendor/
 # You WILL notice some libraries end up in vendor-binary/ : these are libraries
 # that must be built locally.  You should put those libraries into this file.
 # You are NOT recommended to use "pip freeze" to generate this file, as it will
 # include libraries should be present in vendor/
-"""
+""",
     }
 
 
@@ -119,7 +127,10 @@ def sub(c, vars):
 
 
 def make_package_name(name):
-    return name.lower().replace(' ', '_')
+    name = name.lower().replace(' ', '_').replace('-', '_')
+    if name.endswith('_app'):
+        name = name[:-4]
+    return name
 
 
 def main():

@@ -70,13 +70,13 @@ class AppPackage(object):
     @property
     def config_required(self):
         """Bool: is the configuration required"""
-        return self.config.get('config', {}).get('required')
+        return self.description.get('config', {}).get('required')
 
     @property
     def config_template(self):
         """Path: where a configuration template exists"""
         ## FIXME: should this be a command?
-        v = self.config.get('config', {}).get('template')
+        v = self.description.get('config', {}).get('template')
         if v:
             return self.abspath(v)
         return None
@@ -84,7 +84,7 @@ class AppPackage(object):
     @property
     def config_validator(self):
         """Object: validator for the configuration"""
-        v = self.config.get('config', {}).get('validator')
+        v = self.description.get('config', {}).get('validator')
         if v:
             return CommandReference(self, v, 'config.validator')
         return None
@@ -92,7 +92,7 @@ class AppPackage(object):
     @property
     def config_default_dir(self):
         """Path: default configuration if no other is provided"""
-        dir = self.config.get('config', {}).get('default')
+        dir = self.description.get('config', {}).get('default')
         if dir:
             return self.abspath(dir)
         return None
@@ -108,7 +108,7 @@ class AppPackage(object):
         if isinstance(dirs, basestring):
             dirs = [dirs]
         dirs = [self.abspath(dir) for dir in dirs]
-        add_paths = list(self.add_paths)
+        add_paths = list(dirs)
         add_paths.extend([
             self.abspath('lib/python%s' % sys.version[:3]),
             self.abspath('lib/python%s/site-packages' % sys.version[:3]),
@@ -182,7 +182,12 @@ class AppPackage(object):
                                 environ=env, cwd=cwd)
         return proc
 
-    ## FIXME: need something to run "commands" (as defined in the spec)
+    def initialize_for_script(self):
+        """Initializes the environment for the purposes of a script"""
+        venv = os.path.join(self.path, '.virtualenv')
+        if not os.path.exists(venv):
+            venv = None
+        self.activate_path(venv)
 
 
 class Requires(object):
@@ -268,6 +273,10 @@ class Requires(object):
 
 
 class CommandReference(object):
+    """Represents a reference to a command or object in the
+    configuration.  Can be executed with ``.run()`` or an object
+    extracted with ``.get_object()``
+    """
 
     def __init__(self, app, ref, name):
         self.app = app
@@ -284,7 +293,7 @@ class CommandReference(object):
         if ref.startswith('/') or ref.startswith('url:'):
             if ref.startswith('url:'):
                 ref = ref[4:]
-            return 'url', ref
+            return 'url', (ref, None)
         if ref.startswith('script:'):
             ref = ref.split(':', 1)
             path = self.app.abspath(ref)
@@ -292,7 +301,7 @@ class CommandReference(object):
                 first = fp.readline()
             if first.startswith('#!') and 'python' in first:
                 return 'py', (ref, None)
-            return 'script', ref
+            return 'script', (ref, None)
         if ref.endswith('.py') or '.py:' in ref or ref.startswith('pyscript:'):
             if ref.startswith('pyscript:'):
                 ref = ref[len('pyscript:'):]
@@ -305,26 +314,43 @@ class CommandReference(object):
         if self._PY_MOD_RE.search(ref) or ref.startswith('py:'):
             if ref.startswith('py:'):
                 ref = ref[3:]
+            if ':' in ref:
+                path, extra = ref.split(':', 1)
+            else:
+                path = ref
+                extra = None
             return 'py', (path, extra)
 
-    def run(self, *args):
+    def run(self, *args, **kw):
         """Runs the command, returning (text_output, extra_data), or
         raising an exception"""
-        return getattr(self, 'run_' + self.ref_type)(self.app.environment, *args)
+        return getattr(self, 'run_' + self.ref_type)(self.app.environment, *args, **kw)
 
-    def run_url(self, *args):
+    def run_url(self, *args, **kw):
         obj = self.app.wsgi_application.get_object()
-        if '?' in self.ref:
-            path, query_string = self.ref.split('?', 1)
+        url = self.ref_data[0]
+        if '?' in url:
+            path, query_string = url.split('?', 1)
         else:
-            path, query_string = self.ref, ''
+            path, query_string = url, ''
+        all_args = []
         if args:
+            for a in args:
+                all_args.append(None, a)
+        if kw:
+            for name, value in sorted(kw.items()):
+                all_args.append(name, value)
+        if all_args:
             body = []
-            for item in args:
-                if isinstance(item, (int, float, str, unicode)):
-                    body.append(urllib.quote(str(item)))
+            for name, value in args:
+                if isinstance(value, (int, float, str, unicode)):
+                    value = urllib.quote(str(value))
                 else:
-                    body.append(urllib.quote(json.dumps(item)))
+                    value = urllib.quote(json.dumps(value))
+                if name:
+                    body.append('%s=%s' % (urllib.quote(name), value))
+                else:
+                    body.append(value)
             body = '&'.join(body)
         else:
             body = ''
@@ -334,7 +360,7 @@ class CommandReference(object):
             'wsgi.input': StringIO(body),
             'SERVER_NAME': 'localhost',
             'SERVER_PORT': '0',
-            'HTTP_HOST': 'http://localhost:0'
+            'HTTP_HOST': 'http://localhost:0',
             'SCRIPT_NAME': '',
             'PATH_INFO': urllib.unquote(path),
             'QUERY_STRING': query_string,
@@ -360,10 +386,76 @@ class CommandReference(object):
         metadata = {'headers': headers, 'status': status}
         return output, metadata
 
-    def run_script(self, *args):
-        cmd = [self.app.abspath(self.ref)] + list(args)
+    def run_script(self, *args, **kw):
+        if '.cmd' in kw:
+            cmd = [kw.pop('.cmd')]
+        else:
+            cmd = [self.app.abspath(self.ref)]
+        if '.exe' in kw:
+            cmd.insert(0, kw.pop('.exe'))
+        for name, value in sorted(kw.items()):
+            if len(name) == 1:
+                name = '-%s' % name
+            else:
+                name = '--%s' % name
+            cmd.append(name)
+            if value is True:
+                pass
+            elif isinstance(value, (int, float, str, unicode)):
+                cmd.append(str(value))
+            elif isinstance(value, basestring):
+                cmd.append(value)
+            else:
+                cmd.append(json.dumps(value))
+        cmd += list(args)
         proc = subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            cwd=self.app.path)
+        ## FIXME: should set env variables
+        stdout, stderr = proc.communicate()
+        metadata = {'stderr': stderr}
+        return stdout, metadata
 
+    def run_pyscript(self, *args, **kw):
+        env = self.app.environment
+        if env:
+            executable = env.base_python_exe
+        else:
+            executable = sys.executable
+        kw['.exe'] = executable
+        kw['.cmd'] = self.ref[0]
+        if self.ref[1] is not None:
+            raise Exception(
+                "The reference %s contains a function name, which doesn't work with run(): %s" % (self.name, self.ref[1]))
+        return self.run_script(*args, **kw)
+
+    def run_py(self, *args, **kw):
+        obj = self.get_object()
+        ## FIXME: catch stdout/stderr?
+        try:
+            result = obj(*args, **kw)
+        except Exception, e:
+            return None, {'exception': e}
+        else:
+            return result, {}
+
+    def get_object(self):
+        if self.ref_type == 'pyscript':
+            filename = self.ref_data[0]
+            name = self.ref_data[1]
+            ns = {
+                '__file__': filename,
+                '__name__': os.path.splitext(os.path.basename(filename))[0],
+                }
+            execfile(filename, ns)
+            ## FIXME: error check:
+            return ns[name]
+        else:
+            modname = self.ref_data[0]
+            name = self.ref_data[1]
+            __import__(modname)
+            mod = sys.modules[modname]
+            return getattr(mod, name)
 
 
 class Environment(object):
@@ -383,6 +475,7 @@ class Environment(object):
         self.env_base = env_base
         self.base_python_exe = base_python_exe
         self.venv_location = venv_location
+        self.app.environment = self
 
     def run_command(self, command_path, args=None, env=None):
         if self.env_base:
